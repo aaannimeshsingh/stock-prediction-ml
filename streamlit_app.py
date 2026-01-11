@@ -6,6 +6,92 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import os
+
+# Auto-setup on first run
+if not os.path.exists('data/AAPL_data.csv') or not os.path.exists('models/AAPL_best_model.pkl'):
+    st.info("🚀 First time setup: Downloading data and training models...")
+    st.info("This will take 2-3 minutes. Please wait...")
+    
+    try:
+        import yfinance as yf
+        from ta.trend import SMAIndicator, EMAIndicator, MACD
+        from ta.momentum import RSIIndicator
+        from ta.volatility import BollingerBands
+        from sklearn.linear_model import LinearRegression
+        from sklearn.preprocessing import StandardScaler
+        from pathlib import Path
+        
+        # Create directories
+        Path("data").mkdir(exist_ok=True)
+        Path("models").mkdir(exist_ok=True)
+        
+        # Download data
+        tickers = ['AAPL', 'GOOGL', 'MSFT']
+        for ticker in tickers:
+            st.write(f"📥 Downloading {ticker} data...")
+            df = yf.download(ticker, period='2y', progress=False)
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df.to_csv(f'data/{ticker}_data.csv')
+        
+        # Quick feature engineering and training
+        for ticker in tickers:
+            st.write(f"🔧 Training model for {ticker}...")
+            
+            df = pd.read_csv(f'data/{ticker}_data.csv', index_col='Date', parse_dates=True)
+            
+            # Add basic features
+            df['SMA_10'] = SMAIndicator(close=df['Close'], window=10).sma_indicator()
+            df['SMA_20'] = SMAIndicator(close=df['Close'], window=20).sma_indicator()
+            df['SMA_50'] = SMAIndicator(close=df['Close'], window=50).sma_indicator()
+            df['RSI'] = RSIIndicator(close=df['Close'], window=14).rsi()
+            macd = MACD(close=df['Close'])
+            df['MACD'] = macd.macd()
+            df['MACD_Signal'] = macd.macd_signal()
+            df['Price_Change'] = df['Close'].pct_change()
+            
+            df['Target'] = df['Close'].shift(-1)
+            df = df.dropna()
+            
+            # Train/test split
+            split_idx = int(len(df) * 0.8)
+            train_df = df[:split_idx]
+            test_df = df[split_idx:]
+            
+            # Features
+            feature_columns = ['SMA_10', 'SMA_20', 'SMA_50', 'RSI', 'MACD', 'MACD_Signal', 'Price_Change']
+            X_train = train_df[feature_columns]
+            y_train = train_df['Target']
+            
+            # Scale and train
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            model = LinearRegression()
+            model.fit(X_train_scaled, y_train)
+            
+            # Save
+            joblib.dump(model, f'models/{ticker}_best_model.pkl')
+            joblib.dump(scaler, f'models/{ticker}_scaler.pkl')
+            joblib.dump(feature_columns, f'models/{ticker}_features.pkl')
+            
+            # Save train/test data
+            train_df.to_csv(f'data/{ticker}_train.csv')
+            test_df.to_csv(f'data/{ticker}_test.csv')
+            df.to_csv(f'data/{ticker}_features.csv')
+        
+        st.success("✅ Setup complete! Refreshing page...")
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"Setup failed: {e}")
+        st.info("Please run these commands locally first:\n```bash\npython data_collection.py\npython feature_engineering.py\npython train_models.py\n```")
+        st.stop()
+
+# Import TA libraries after setup
+from ta.trend import SMAIndicator, EMAIndicator, MACD
+from ta.momentum import RSIIndicator
+from ta.volatility import BollingerBands
 
 # Page config
 st.set_page_config(page_title="Stock Price Predictor", page_icon="📈", layout="wide")
