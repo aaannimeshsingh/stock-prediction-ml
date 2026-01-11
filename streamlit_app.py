@@ -6,92 +6,6 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-import os
-
-# Auto-setup on first run
-if not os.path.exists('data/AAPL_data.csv') or not os.path.exists('models/AAPL_best_model.pkl'):
-    st.info("🚀 First time setup: Downloading data and training models...")
-    st.info("This will take 2-3 minutes. Please wait...")
-    
-    try:
-        import yfinance as yf
-        from ta.trend import SMAIndicator, EMAIndicator, MACD
-        from ta.momentum import RSIIndicator
-        from ta.volatility import BollingerBands
-        from sklearn.linear_model import LinearRegression
-        from sklearn.preprocessing import StandardScaler
-        from pathlib import Path
-        
-        # Create directories
-        Path("data").mkdir(exist_ok=True)
-        Path("models").mkdir(exist_ok=True)
-        
-        # Download data
-        tickers = ['AAPL', 'GOOGL', 'MSFT']
-        for ticker in tickers:
-            st.write(f"📥 Downloading {ticker} data...")
-            df = yf.download(ticker, period='2y', progress=False)
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-            df.to_csv(f'data/{ticker}_data.csv')
-        
-        # Quick feature engineering and training
-        for ticker in tickers:
-            st.write(f"🔧 Training model for {ticker}...")
-            
-            df = pd.read_csv(f'data/{ticker}_data.csv', index_col='Date', parse_dates=True)
-            
-            # Add basic features
-            df['SMA_10'] = SMAIndicator(close=df['Close'], window=10).sma_indicator()
-            df['SMA_20'] = SMAIndicator(close=df['Close'], window=20).sma_indicator()
-            df['SMA_50'] = SMAIndicator(close=df['Close'], window=50).sma_indicator()
-            df['RSI'] = RSIIndicator(close=df['Close'], window=14).rsi()
-            macd = MACD(close=df['Close'])
-            df['MACD'] = macd.macd()
-            df['MACD_Signal'] = macd.macd_signal()
-            df['Price_Change'] = df['Close'].pct_change()
-            
-            df['Target'] = df['Close'].shift(-1)
-            df = df.dropna()
-            
-            # Train/test split
-            split_idx = int(len(df) * 0.8)
-            train_df = df[:split_idx]
-            test_df = df[split_idx:]
-            
-            # Features
-            feature_columns = ['SMA_10', 'SMA_20', 'SMA_50', 'RSI', 'MACD', 'MACD_Signal', 'Price_Change']
-            X_train = train_df[feature_columns]
-            y_train = train_df['Target']
-            
-            # Scale and train
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(X_train)
-            model = LinearRegression()
-            model.fit(X_train_scaled, y_train)
-            
-            # Save
-            joblib.dump(model, f'models/{ticker}_best_model.pkl')
-            joblib.dump(scaler, f'models/{ticker}_scaler.pkl')
-            joblib.dump(feature_columns, f'models/{ticker}_features.pkl')
-            
-            # Save train/test data
-            train_df.to_csv(f'data/{ticker}_train.csv')
-            test_df.to_csv(f'data/{ticker}_test.csv')
-            df.to_csv(f'data/{ticker}_features.csv')
-        
-        st.success("✅ Setup complete! Refreshing page...")
-        st.rerun()
-        
-    except Exception as e:
-        st.error(f"Setup failed: {e}")
-        st.info("Please run these commands locally first:\n```bash\npython data_collection.py\npython feature_engineering.py\npython train_models.py\n```")
-        st.stop()
-
-# Import TA libraries after setup
-from ta.trend import SMAIndicator, EMAIndicator, MACD
-from ta.momentum import RSIIndicator
-from ta.volatility import BollingerBands
 
 # Page config
 st.set_page_config(page_title="Stock Price Predictor", page_icon="📈", layout="wide")
@@ -279,14 +193,18 @@ try:
         st.markdown("#### Moving Averages")
         fig_ma = go.Figure()
         
-        fig_ma.add_trace(go.Scatter(x=recent_features.index, y=recent_features['Close'], 
-                                    name='Close Price', line=dict(color='black', width=2)))
-        fig_ma.add_trace(go.Scatter(x=recent_features.index, y=recent_features['SMA_10'], 
-                                    name='SMA 10', line=dict(color='orange', width=1.5)))
-        fig_ma.add_trace(go.Scatter(x=recent_features.index, y=recent_features['SMA_20'], 
-                                    name='SMA 20', line=dict(color='green', width=1.5)))
-        fig_ma.add_trace(go.Scatter(x=recent_features.index, y=recent_features['SMA_50'], 
-                                    name='SMA 50', line=dict(color='red', width=1.5)))
+        # Drop NaN for clean plotting
+        ma_data = recent_features[['Close', 'SMA_10', 'SMA_20', 'SMA_50']].dropna()
+        
+        if len(ma_data) > 0:
+            fig_ma.add_trace(go.Scatter(x=ma_data.index, y=ma_data['Close'], 
+                                        name='Close Price', line=dict(color='black', width=2)))
+            fig_ma.add_trace(go.Scatter(x=ma_data.index, y=ma_data['SMA_10'], 
+                                        name='SMA 10', line=dict(color='orange', width=1.5)))
+            fig_ma.add_trace(go.Scatter(x=ma_data.index, y=ma_data['SMA_20'], 
+                                        name='SMA 20', line=dict(color='green', width=1.5)))
+            fig_ma.add_trace(go.Scatter(x=ma_data.index, y=ma_data['SMA_50'], 
+                                        name='SMA 50', line=dict(color='red', width=1.5)))
         
         fig_ma.update_layout(height=400, template='plotly_white', 
                             title='Price with Moving Averages')
@@ -297,63 +215,97 @@ try:
         
         with col1:
             st.markdown("#### RSI (Relative Strength Index)")
-            fig_rsi = go.Figure()
-            fig_rsi.add_trace(go.Scatter(x=recent_features.index, y=recent_features['RSI'], 
-                                         mode='lines', name='RSI', 
-                                         line=dict(color='purple', width=2)))
-            fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", 
-                             annotation_text="Overbought (70)")
-            fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", 
-                             annotation_text="Oversold (30)")
             
-            fig_rsi.update_layout(height=300, template='plotly_white')
-            st.plotly_chart(fig_rsi, use_container_width=True)
+            # Drop NaN for RSI
+            rsi_data = recent_features[['RSI']].dropna()
             
-            # RSI interpretation
-            current_rsi = recent_features['RSI'].iloc[-1]
-            if current_rsi > 70:
-                st.warning(f"⚠️ RSI: {current_rsi:.1f} - Overbought")
-            elif current_rsi < 30:
-                st.success(f"✅ RSI: {current_rsi:.1f} - Oversold")
+            if len(rsi_data) > 0:
+                fig_rsi = go.Figure()
+                fig_rsi.add_trace(go.Scatter(x=rsi_data.index, y=rsi_data['RSI'], 
+                                             mode='lines', name='RSI', 
+                                             line=dict(color='purple', width=2)))
+                fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", 
+                                 annotation_text="Overbought (70)")
+                fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", 
+                                 annotation_text="Oversold (30)")
+                
+                fig_rsi.update_layout(height=300, template='plotly_white')
+                st.plotly_chart(fig_rsi, use_container_width=True)
+                
+                # RSI interpretation
+                current_rsi = rsi_data['RSI'].iloc[-1]
+                if current_rsi > 70:
+                    st.warning(f"⚠️ RSI: {current_rsi:.1f} - Overbought")
+                elif current_rsi < 30:
+                    st.success(f"✅ RSI: {current_rsi:.1f} - Oversold")
+                else:
+                    st.info(f"ℹ️ RSI: {current_rsi:.1f} - Neutral")
             else:
-                st.info(f"ℹ️ RSI: {current_rsi:.1f} - Neutral")
+                st.warning("Not enough data to display RSI")
         
         with col2:
             st.markdown("#### MACD")
-            fig_macd = go.Figure()
-            fig_macd.add_trace(go.Scatter(x=recent_features.index, y=recent_features['MACD'], 
-                                          name='MACD', line=dict(color='blue', width=2)))
-            fig_macd.add_trace(go.Scatter(x=recent_features.index, y=recent_features['MACD_Signal'], 
-                                          name='Signal Line', line=dict(color='orange', width=2)))
-            fig_macd.add_trace(go.Bar(x=recent_features.index, y=recent_features['MACD_Diff'], 
-                                      name='Histogram', marker_color='gray', opacity=0.3))
             
-            fig_macd.update_layout(height=300, template='plotly_white')
-            st.plotly_chart(fig_macd, use_container_width=True)
+            # Drop NaN for MACD - THIS IS THE FIX!
+            macd_data = recent_features[['MACD', 'MACD_Signal', 'MACD_Diff']].dropna()
             
-            # MACD interpretation
-            current_macd = recent_features['MACD'].iloc[-1]
-            current_signal = recent_features['MACD_Signal'].iloc[-1]
-            if current_macd > current_signal:
-                st.success("✅ MACD: Bullish Signal")
+            if len(macd_data) > 0:
+                fig_macd = go.Figure()
+                fig_macd.add_trace(go.Scatter(
+                    x=macd_data.index, 
+                    y=macd_data['MACD'], 
+                    name='MACD', 
+                    line=dict(color='blue', width=2)
+                ))
+                fig_macd.add_trace(go.Scatter(
+                    x=macd_data.index, 
+                    y=macd_data['MACD_Signal'], 
+                    name='Signal Line', 
+                    line=dict(color='orange', width=2)
+                ))
+                fig_macd.add_trace(go.Bar(
+                    x=macd_data.index, 
+                    y=macd_data['MACD_Diff'], 
+                    name='Histogram', 
+                    marker_color='gray', 
+                    opacity=0.3
+                ))
+                
+                fig_macd.update_layout(height=300, template='plotly_white')
+                st.plotly_chart(fig_macd, use_container_width=True)
+                
+                # MACD interpretation
+                current_macd = macd_data['MACD'].iloc[-1]
+                current_signal = macd_data['MACD_Signal'].iloc[-1]
+                if current_macd > current_signal:
+                    st.success("✅ MACD: Bullish Signal")
+                else:
+                    st.error("⚠️ MACD: Bearish Signal")
             else:
-                st.error("⚠️ MACD: Bearish Signal")
+                st.warning("Not enough data to display MACD")
         
         # Bollinger Bands
         st.markdown("#### Bollinger Bands")
-        fig_bb = go.Figure()
         
-        fig_bb.add_trace(go.Scatter(x=recent_features.index, y=recent_features['BB_High'], 
-                                    name='Upper Band', line=dict(color='red', width=1, dash='dash')))
-        fig_bb.add_trace(go.Scatter(x=recent_features.index, y=recent_features['BB_Mid'], 
-                                    name='Middle Band', line=dict(color='blue', width=1)))
-        fig_bb.add_trace(go.Scatter(x=recent_features.index, y=recent_features['BB_Low'], 
-                                    name='Lower Band', line=dict(color='green', width=1, dash='dash')))
-        fig_bb.add_trace(go.Scatter(x=recent_features.index, y=recent_features['Close'], 
-                                    name='Close Price', line=dict(color='black', width=2)))
+        # Drop NaN for Bollinger Bands
+        bb_data = recent_features[['Close', 'BB_High', 'BB_Mid', 'BB_Low']].dropna()
         
-        fig_bb.update_layout(height=400, template='plotly_white')
-        st.plotly_chart(fig_bb, use_container_width=True)
+        if len(bb_data) > 0:
+            fig_bb = go.Figure()
+            
+            fig_bb.add_trace(go.Scatter(x=bb_data.index, y=bb_data['BB_High'], 
+                                        name='Upper Band', line=dict(color='red', width=1, dash='dash')))
+            fig_bb.add_trace(go.Scatter(x=bb_data.index, y=bb_data['BB_Mid'], 
+                                        name='Middle Band', line=dict(color='blue', width=1)))
+            fig_bb.add_trace(go.Scatter(x=bb_data.index, y=bb_data['BB_Low'], 
+                                        name='Lower Band', line=dict(color='green', width=1, dash='dash')))
+            fig_bb.add_trace(go.Scatter(x=bb_data.index, y=bb_data['Close'], 
+                                        name='Close Price', line=dict(color='black', width=2)))
+            
+            fig_bb.update_layout(height=400, template='plotly_white')
+            st.plotly_chart(fig_bb, use_container_width=True)
+        else:
+            st.warning("Not enough data to display Bollinger Bands")
     
     with tab4:
         st.subheader("🤖 Model Performance Metrics")
@@ -435,7 +387,7 @@ try:
 
 except FileNotFoundError as e:
     st.error(f"❌ Error loading data for {ticker}. Please make sure you've run the training scripts first.")
-    st.info("Run these commands in order: `python data_collection.py`, `python feature_engineering.py`, `python train_models.py`")
+    st.info("Run these commands in order:\n```bash\npython data_collection.py\npython feature_engineering.py\npython train_models.py\n```")
 
 # Footer
 st.markdown("---")
@@ -444,4 +396,4 @@ st.warning("This is an educational project for learning machine learning and dat
 
 st.markdown("---")
 st.markdown("**Built with ❤️ by Animesh Singh** | MIT Manipal | B.Tech Computer Science & Financial Technology")
-st.markdown("📧 animeshsinghmanu@gmail.com | [GitHub](https://github.com/aaannimeshsingh)")
+st.markdown("📧 animeshsinghmanu@gmail.com | [LinkedIn](https://linkedin.com/in/animesh-singh) | [GitHub](https://github.com/aaannimeshsingh)")
